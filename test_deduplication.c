@@ -100,6 +100,20 @@ void deduplicate_file(FILE *file, Chunk *chunks, Md5Entry *hash_table) {
     printf("Déduplication terminée, %d chunks traités.\n", chunk_index);
 }
 
+// Fonction pour afficher la table de hachage
+void print_hash_table(Md5Entry *hash_table) {
+    printf("\nTable de hachage des MD5 et leurs indices:\n");
+    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+        if (hash_table[i].index != -1) {
+            printf("Index: %d, MD5: ", hash_table[i].index);
+            for (int j = 0; j < MD5_DIGEST_LENGTH; j++) {
+                printf("%02x", hash_table[i].md5[j]);
+            }
+            printf("\n");
+        }
+    }
+}
+
 int main() {
     // Ouvrir le fichier à dédupliquer
     FILE *file = fopen("Hello.txt", "rb");
@@ -119,6 +133,9 @@ int main() {
     
     // Appeler la fonction pour dédupliquer le fichier
     deduplicate_file(file, chunks, hash_table);
+    
+    // Afficher la table de hachage après déduplication
+    print_hash_table(hash_table);
     
     // Fermer le fichier
     fclose(file);
