@@ -39,7 +39,7 @@ void create_backup(const char *source_dir, const char *backup_dir) {
         }
 
         if (S_ISREG(st.st_mode)) { // Si c'est un fichier
-            backup_file(full_path);
+            backup_file(backup_dir);
         }
     }
 
