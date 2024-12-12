@@ -1,22 +1,32 @@
+# Compilateur et options
 CC = gcc
-CFLAGS = -Wall -Wextra -I/home/qricci/Documents/Projetlp25
+CFLAGS = -Wall -Wextra -I./
 LDFLAGS = -lssl -lcrypto
 
-SRC = /home/qricci/Documents/Projetlp25/main.c /home/qricci/Documents/Projetlp25/file_handler.c /home/qricci/Documents/Projetlp25/deduplication.c /home/qricci/Documents/Projetlp25/backup_manager.c
+# Répertoires et fichiers
+SRC_DIR = /home/qricci/Documents/Projetlp25
+SRC = $(SRC_DIR)/main.c \
+      $(SRC_DIR)/file_handler.c \
+      $(SRC_DIR)/deduplication.c \
+      $(SRC_DIR)/backup_manager.c
 OBJ = $(SRC:.c=.o)
+TARGET = lp25_borgbackup
 
-# Règle par défaut (tout)
-all: lp25_borgbackup
+# Règle par défaut
+all: $(TARGET)
 
 # Compilation de l'exécutable
-lp25_borgbackup: $(OBJ)
+$(TARGET): $(OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS)
 
 # Compilation des fichiers .c en .o
-%.o: /home/qricci/Documents/Projetlp25/%.c
+%.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Nettoyage
 clean:
-	rm -f $(OBJ) lp25_borgbackup
+	rm -f $(OBJ) $(TARGET)
 
+# Nettoyage complet
+distclean: clean
+	rm -f *~ *.bak

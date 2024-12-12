@@ -6,88 +6,60 @@
 #include "deduplication.h"
 #include "backup_manager.h"
 
-// Fonction d'affichage de l'aide
-void print_usage() {
-    printf("Usage: backup_tool [options]\n");
+void print_usage(const char *prog_name) {
+    printf("Usage: %s [options]\n", prog_name);
     printf("Options:\n");
-    printf("  --backup <source_dir> <backup_dir>  Crée une nouvelle sauvegarde (complète puis incrémentale)\n");
-    printf("  --restore <backup_id> <restore_dir> Restaure une sauvegarde\n");
-    printf("  --list-backups <backup_dir>         Liste les sauvegardes disponibles dans le répertoire\n");
-    printf("  --help                             Affiche cette aide\n");
+    printf("  --backup <source_dir> <backup_dir>  Crée une sauvegarde du répertoire source dans le répertoire de sauvegarde.\n");
+    printf("  --help                              Affiche cette aide.\n");
 }
 
 int main(int argc, char *argv[]) {
-    int opt;
+    int option_index = 0;
     const char *source_dir = NULL;
     const char *backup_dir = NULL;
-    const char *backup_id = NULL;
-    const char *restore_dir = NULL;
 
-    // Définition des options à parser
-    struct option long_options[] = {
-        {"backup", no_argument, NULL, 'b'},
-        {"restore", no_argument, NULL, 'r'},
-        {"list-backups", required_argument, NULL, 'l'},
-        {"help", no_argument, NULL, 'h'},
+    static struct option long_options[] = {
+        {"backup", required_argument, 0, 'b'},
+        {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
 
-    // Analyse des arguments de ligne de commande
-    while ((opt = getopt_long(argc, argv, "b:r:l:h", long_options, NULL)) != -1) {
+    if (argc < 2) {
+        print_usage(argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    int opt;
+    while ((opt = getopt_long(argc, argv, "b:h", long_options, &option_index)) != -1) {
         switch (opt) {
-            case 'b': {
-                // Sauvegarde : --backup <source_dir> <backup_dir>
-                if (optind + 1 < argc) {
-                    source_dir = argv[optind++];
-                    backup_dir = argv[optind++];
-                    printf("Création de la sauvegarde depuis '%s' vers '%s'.\n", source_dir, backup_dir);
-                    create_backup(source_dir, backup_dir);
+            case 'b':
+                if (optind < argc - 1) {
+                    source_dir = optarg;
+                    backup_dir = argv[optind];
                 } else {
-                    fprintf(stderr, "Erreur : Vous devez spécifier les répertoires source et de sauvegarde.\n");
-                    print_usage();
+                    fprintf(stderr, "Erreur : Vous devez spécifier un répertoire source et un répertoire de sauvegarde.\n");
                     return EXIT_FAILURE;
                 }
                 break;
-            }
-            case 'r': {
-                // Restauration : --restore <backup_id> <restore_dir>
-                if (optind + 1 < argc) {
-                    backup_id = argv[optind++];
-                    restore_dir = argv[optind++];
-                    printf("Restauration de la sauvegarde '%s' vers '%s'.\n", backup_id, restore_dir);
-                    restore_backup(backup_id, restore_dir);
-                } else {
-                    fprintf(stderr, "Erreur : Vous devez spécifier l'ID de sauvegarde et le répertoire de restauration.\n");
-                    print_usage();
-                    return EXIT_FAILURE;
-                }
-                break;
-            }
-            case 'l': {
-                // Liste des sauvegardes : --list-backups <backup_dir>
-                backup_dir = optarg;
-                printf("Liste des sauvegardes dans le répertoire '%s'.\n", backup_dir);
-                // Implémentation de la liste des sauvegardes à ajouter ici
-                break;
-            }
-            case 'h': {
-                // Affiche l'aide
-                print_usage();
+
+            case 'h':
+                print_usage(argv[0]);
                 return EXIT_SUCCESS;
-            }
-            default: {
-                print_usage();
+
+            default:
+                print_usage(argv[0]);
                 return EXIT_FAILURE;
-            }
         }
     }
 
-    // Si aucun argument valide n'a été passé
-    if (argc == 1) {
-        print_usage();
+    if (source_dir && backup_dir) {
+        printf("Démarrage de la sauvegarde...\n");
+        create_backup(source_dir, backup_dir);
+        printf("Sauvegarde terminée avec succès.\n");
+    } else {
+        fprintf(stderr, "Erreur : Arguments invalides. Utilisez --help pour plus d'informations.\n");
         return EXIT_FAILURE;
     }
 
     return EXIT_SUCCESS;
 }
-
