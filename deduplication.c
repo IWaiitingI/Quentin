@@ -28,10 +28,10 @@ int find_md5(Md5Entry *hash_table, unsigned char *md5) {
     unsigned int index = hash_md5(md5);
     for (int i = 0; i < HASH_TABLE_SIZE; i++) {
         int pos = (index + i) % HASH_TABLE_SIZE;
+        
         if (hash_table[pos].index == -1) {
             break; // Case vide
         }
-        
         if (memcmp(hash_table[pos].md5, md5, MD5_DIGEST_LENGTH) == 0) {
             return hash_table[pos].index; // MD5 trouvé
         }
