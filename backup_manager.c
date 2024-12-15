@@ -264,20 +264,20 @@ char* construct_folder_path(const char *base_path, const char *folder_name) {
 }
 
 
-// Function to join paths safely
+// Fonction créer chemins complets
 void join_paths(const char *base, const char *name, char *result, size_t size) {
     snprintf(result, size, "%s/%s", base, name);
 }
 
 #include <errno.h>
-#include <limits.h> // Inclure pour PATH_MAX si disponible
+#include <limits.h> // Inclure PATH_MAX si disponible
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096 // Définit PATH_MAX si non défini par le système
 #endif
 
 
-// Recursive function to copy source to destination using hard links
+// Fonction recursive creant une copie vers la destianation liens durs
 int copy_with_hard_links(const char *source, const char *destination) {
     DIR *dir;
     struct dirent *entry;
@@ -285,53 +285,53 @@ int copy_with_hard_links(const char *source, const char *destination) {
     char source_path[PATH_MAX];
     char destination_path[PATH_MAX];
 
-    // Open the source directory
+    // Ouvre le repertoire source
     dir = opendir(source);
     if (dir == NULL) {
-        perror("Failed to open source directory");
+        perror("Erreur d'ouverture du repertoire source");
         return -1;
     }
 
-    // Ensure the destination directory exists
+    // Verifier la sortie du repertoire source
     if (mkdir(destination, 0755) == -1 && errno != EEXIST) {
-        perror("Failed to create destination directory");
+        perror("Erreur de creation du repertoire de destination");
         closedir(dir);
         return -1;
     }
 
-    // Iterate over all entries in the source directory
+    // Iteration sur toutes les entrees du repertoire source
     while ((entry = readdir(dir)) != NULL) {
-        // Skip "." and ".."
+        // Suivant "." et ".."
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
 
-        // Construct full paths for source and destination
+        // Construction les chemins complets pour source et destination
         join_paths(source, entry->d_name, source_path, sizeof(source_path));
         join_paths(destination, entry->d_name, destination_path, sizeof(destination_path));
 
-        // Get the entry's metadata
+        // Obtenir les metadata de l'entree
         if (lstat(source_path, &entry_stat) == -1) {
             perror("Failed to stat source entry");
             closedir(dir);
             return -1;
         }
 
-        // Handle directories recursively
+        // Gestion des repertoires en recursif
         if (S_ISDIR(entry_stat.st_mode)) {
             if (copy_with_hard_links(source_path, destination_path) == -1) {
                 closedir(dir);
                 return -1;
             }
         } else if (S_ISREG(entry_stat.st_mode)) {
-            // Create a hard link for regular files
+            // Cree un lien dur pour les fichiers
             if (link(source_path, destination_path) == -1) {
-                perror("Failed to create hard link");
+                perror("Erreur de creation de lien dur");
                 closedir(dir);
                 return -1;
             }
         } else {
-            fprintf(stderr, "Skipping unsupported file type: %s\n", source_path);
+            fprintf(stderr, "Ignoration du type de fichier non pris en charge %s\n", source_path);
         }
     }
 
