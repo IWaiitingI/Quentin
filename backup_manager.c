@@ -132,7 +132,7 @@ const char *find_most_recent_folder(log_t *logs) {
     return folder_name; // Retourner le nom du dossier (ex: "2024-12-15-16:37:24.967")
 }
 
-void process_directory(const char *directory_path) {
+void process_directory(const char *directory_path, FILE *logs) {
     DIR *dir;
     struct dirent *entry;
 
@@ -157,7 +157,7 @@ void process_directory(const char *directory_path) {
         // Appelle la fonction create_log_element_from_file pour chaque fichier
         log_element test_element;
         create_log_element_from_file(file_to_process, &test_element);
-        FILE *logfile = fopen("/home/qricci/Documents/Test_backup/.backup_log", "a");
+        FILE *logfile = fopen(logs, "a");
         if (!logfile) {
             perror("Erreur lors de l'ouverture du fichier de log");
             free(test_element.path);
@@ -217,9 +217,19 @@ void create_backup(const char *source_dir, const char *backup_dir) {
         // Copier le répertoire source
         copy_file(source_dir, full_backup_path);
 
-        process_directory(full_backup_path);
+        process_directory(full_backup_path, log_path);
+
+        // Créer le chemin complet du fichier de log à l'intérieur du répertoire de sauvegarde
+        char log_dest_path[512];
+        snprintf(log_dest_path, sizeof(log_dest_path), "%s/.backup_log", full_backup_path);
+
+        // Copier le fichier de log dans le répertoire de sauvegarde
+
+
         // Fermer le fichier de log
         fclose(logfile);
+
+        copy_single_file(log_path, log_dest_path);
 
     } else {
         // Sauvegarde incrémentale
@@ -235,7 +245,16 @@ void create_backup(const char *source_dir, const char *backup_dir) {
             
             printf("Dossier le plus récent : %s\n", most_recent_folder_path);
 
+            // Copier les fichiers avec des liens durs
             copy_with_hard_links(most_recent_folder_path, full_backup_path);
+
+            char log_path[512];
+            snprintf(log_path, sizeof(log_path), "%s/.backup_log", backup_dir);
+            FILE *logfile = fopen(log_path, "a");
+
+            process_directory(full_backup_path, log_path );
+
+
         } else {
             printf("Aucun dossier précédent trouvé.\n");
         }
@@ -243,6 +262,7 @@ void create_backup(const char *source_dir, const char *backup_dir) {
 
     printf("Sauvegarde terminée : %s\n", full_backup_path);
 }
+
 
 
 
@@ -264,20 +284,20 @@ char* construct_folder_path(const char *base_path, const char *folder_name) {
 }
 
 
-// Fonction créer chemins complets
+// Function to join paths safely
 void join_paths(const char *base, const char *name, char *result, size_t size) {
     snprintf(result, size, "%s/%s", base, name);
 }
 
 #include <errno.h>
-#include <limits.h> // Inclure PATH_MAX si disponible
+#include <limits.h> // Inclure pour PATH_MAX si disponible
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096 // Définit PATH_MAX si non défini par le système
 #endif
 
 
-// Fonction recursive creant une copie vers la destianation liens durs
+// Recursive function to copy source to destination using hard links
 int copy_with_hard_links(const char *source, const char *destination) {
     DIR *dir;
     struct dirent *entry;
@@ -285,59 +305,60 @@ int copy_with_hard_links(const char *source, const char *destination) {
     char source_path[PATH_MAX];
     char destination_path[PATH_MAX];
 
-    // Ouvre le repertoire source
+    // Open the source directory
     dir = opendir(source);
     if (dir == NULL) {
-        perror("Erreur d'ouverture du repertoire source");
+        perror("Failed to open source directory");
         return -1;
     }
 
-    // Verifier la sortie du repertoire source
+    // Ensure the destination directory exists
     if (mkdir(destination, 0755) == -1 && errno != EEXIST) {
-        perror("Erreur de creation du repertoire de destination");
+        perror("Failed to create destination directory");
         closedir(dir);
         return -1;
     }
 
-    // Iteration sur toutes les entrees du repertoire source
+    // Iterate over all entries in the source directory
     while ((entry = readdir(dir)) != NULL) {
-        // Suivant "." et ".."
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+        // Skip "." and ".." and files that start with a "."
+        if (entry->d_name[0] == '.' || strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
 
-        // Construction les chemins complets pour source et destination
+        // Construct full paths for source and destination
         join_paths(source, entry->d_name, source_path, sizeof(source_path));
         join_paths(destination, entry->d_name, destination_path, sizeof(destination_path));
 
-        // Obtenir les metadata de l'entree
+        // Get the entry's metadata
         if (lstat(source_path, &entry_stat) == -1) {
             perror("Failed to stat source entry");
             closedir(dir);
             return -1;
         }
 
-        // Gestion des repertoires en recursif
+        // Handle directories recursively
         if (S_ISDIR(entry_stat.st_mode)) {
             if (copy_with_hard_links(source_path, destination_path) == -1) {
                 closedir(dir);
                 return -1;
             }
         } else if (S_ISREG(entry_stat.st_mode)) {
-            // Cree un lien dur pour les fichiers
+            // Create a hard link for regular files
             if (link(source_path, destination_path) == -1) {
-                perror("Erreur de creation de lien dur");
+                perror("Failed to create hard link");
                 closedir(dir);
                 return -1;
             }
         } else {
-            fprintf(stderr, "Ignoration du type de fichier non pris en charge %s\n", source_path);
+            fprintf(stderr, "Skipping unsupported file type: %s\n", source_path);
         }
     }
 
     closedir(dir);
     return 0;
 }
+
 
 
 

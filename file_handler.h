@@ -24,6 +24,8 @@ log_t read_backup_log(const char *logfile);
 void update_backup_log(const char *logfile, log_t *logs);
 void write_log_element(log_element *elt, FILE *logfile);
 void list_files(const char *path);
+void copy_single_file(const char *src_file, const char *dest_file);
+void copy_directory(const char *src, const char *dest);
 void copy_file(const char *src, const char *dest);
 
 #endif // FILE_HANDLER_H
