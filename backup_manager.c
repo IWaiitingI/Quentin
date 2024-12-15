@@ -32,26 +32,48 @@ void generate_backup_name(char *buffer, size_t size) {
 
 
 // Fonction pour calculer le MD5 d'un fichier
-int calculate_md5(const char *file_path, unsigned char *md5_digest) {
-    FILE *file = fopen(file_path, "rb");
+char *calculate_md5(const char *filename) {
+    FILE *file = fopen(filename, "rb");
     if (!file) {
-        perror("Erreur lors de l'ouverture du fichier pour calculer le MD5");
-        return -1;
+        perror("Erreur lors de l'ouverture du fichier");
+        return NULL;
     }
 
-    MD5_CTX md5_context;
-    MD5_Init(&md5_context);
+    MD5_CTX md5_ctx;
+    unsigned char data[1024];
+    unsigned char hash[MD5_DIGEST_LENGTH];
+    char *md5_string = malloc(MD5_DIGEST_LENGTH * 2 + 1); // 2 caractères par octet + 1 pour '\0'
 
-    char buffer[1024];
+    if (!md5_string) {
+        fprintf(stderr, "Erreur d'allocation mémoire\n");
+        fclose(file);
+        return NULL;
+    }
+
+    MD5_Init(&md5_ctx);
+
+    // Lecture du fichier par blocs et mise à jour du calcul MD5
     size_t bytes_read;
-    while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0) {
-        MD5_Update(&md5_context, buffer, bytes_read);
+    while ((bytes_read = fread(data, 1, sizeof(data), file)) > 0) {
+        MD5_Update(&md5_ctx, data, bytes_read);
     }
 
+    if (ferror(file)) {
+        perror("Erreur lors de la lecture du fichier");
+        free(md5_string);
+        fclose(file);
+        return NULL;
+    }
+
+    MD5_Final(hash, &md5_ctx);
     fclose(file);
 
-    MD5_Final(md5_digest, &md5_context);
-    return 0;
+    // Convertir le hash en une chaîne hexadécimale
+    for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
+        sprintf(&md5_string[i * 2], "%02x", hash[i]);
+    }
+
+    return md5_string;
 }
 
 // Fonction pour récupérer la date de dernière modification
@@ -71,59 +93,10 @@ char *get_modification_date(const char *file_path) {
 
     struct tm *mod_time = localtime(&file_stat.st_mtime);
     strftime(date_str, 20, "%Y-%m-%d %H:%M:%S", mod_time);
-
     return date_str;
 }
 
 // Fonction principale pour créer un log_element à partir d'un fichier
-log_element *create_log_element(const char *file_path) {
-    struct stat file_stat;
-    if (stat(file_path, &file_stat) == -1) {
-        perror("Erreur lors de la récupération des informations du fichier");
-        return NULL;
-    }
-
-    // Vérifier si le chemin correspond bien à un fichier régulier
-    if (!S_ISREG(file_stat.st_mode)) {
-        fprintf(stderr, "Le chemin fourni n'est pas un fichier régulier : %s\n", file_path);
-        return NULL;
-    }
-
-    // Allouer et initialiser la structure log_element
-    log_element *element = malloc(sizeof(log_element));
-    if (!element) {
-        perror("Erreur d'allocation mémoire pour log_element");
-        return NULL;
-    }
-
-    element->path = strdup(file_path);
-    if (!element->path) {
-        perror("Erreur d'allocation mémoire pour le chemin du fichier");
-        free(element);
-        return NULL;
-    }
-
-    // Récupérer la date de dernière modification
-    element->date = get_modification_date(file_path);
-    if (!element->date) {
-        free((char *)element->path);
-        free(element);
-        return NULL;
-    }
-
-    // Calculer le MD5 du fichier
-    if (calculate_md5(file_path, element->md5) == -1) {
-        free(element->date);
-        free((char *)element->path);
-        free(element);
-        return NULL;
-    }
-
-    element->next = NULL;
-    element->prev = NULL;
-
-    return element;
-}
 
 
 
@@ -143,8 +116,62 @@ const char *find_most_recent_folder(log_t *logs) {
         current = current->next;
     }
 
-    return most_recent->path; // Retourner le chemin du dossier le plus récent
+    // Retourner le nom du dossier correspondant à la date la plus récente
+    // Extraire la première partie de la date (avant le premier point-virgule)
+    char *folder_name = strdup(most_recent->date);
+    if (!folder_name) {
+        return NULL; // Erreur d'allocation mémoire
+    }
+
+    // Trouver le premier point-virgule et ajouter un terminateur
+    char *semicolon_pos = strchr(folder_name, ';');
+    if (semicolon_pos) {
+        *semicolon_pos = '\0'; // Terminer la chaîne avant le point-virgule
+    }
+
+    return folder_name; // Retourner le nom du dossier (ex: "2024-12-15-16:37:24.967")
 }
+
+void process_directory(const char *directory_path) {
+    DIR *dir;
+    struct dirent *entry;
+
+    // Ouvre le dossier
+    dir = opendir(directory_path);
+    if (dir == NULL) {
+        perror("Erreur lors de l'ouverture du dossier");
+        return;
+    }
+
+    // Parcours les fichiers du dossier
+    while ((entry = readdir(dir)) != NULL) {
+        // Ignore les fichiers "." et ".."
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        // Construit le chemin complet du fichier
+        char file_to_process[1024];
+        snprintf(file_to_process, sizeof(file_to_process), "%s/%s", directory_path, entry->d_name);
+
+        // Appelle la fonction create_log_element_from_file pour chaque fichier
+        log_element test_element;
+        create_log_element_from_file(file_to_process, &test_element);
+        FILE *logfile = fopen("/home/qricci/Documents/Test_backup/.backup_log", "a");
+        if (!logfile) {
+            perror("Erreur lors de l'ouverture du fichier de log");
+            free(test_element.path);
+            free(test_element.date);
+        return 1;
+    }
+        write_log_element(&test_element, logfile);
+    }
+
+    // Ferme le dossier
+    closedir(dir);
+}
+
+
 
 // Fonction principale pour créer une sauvegarde
 void create_backup(const char *source_dir, const char *backup_dir) {
@@ -178,7 +205,7 @@ void create_backup(const char *source_dir, const char *backup_dir) {
 
     if (access(previous_backup_path, F_OK) == -1) {
         // Première sauvegarde : copier tout simplement le répertoire source
-            // Ouvrir le fichier de log
+        // Ouvrir le fichier de log
         char log_path[512];
         snprintf(log_path, sizeof(log_path), "%s/.backup_log", backup_dir);
         FILE *logfile = fopen(log_path, "w");
@@ -189,6 +216,8 @@ void create_backup(const char *source_dir, const char *backup_dir) {
 
         // Copier le répertoire source
         copy_file(source_dir, full_backup_path);
+
+        process_directory(full_backup_path);
         // Fermer le fichier de log
         fclose(logfile);
 
@@ -197,21 +226,121 @@ void create_backup(const char *source_dir, const char *backup_dir) {
         printf("Sauvegarde précédente détectée. Création d'une sauvegarde incrémentale...\n");
         log_t logs = read_backup_log(previous_backup_path);
         
-        printf("Dossier: %s",find_most_recent_folder(&logs));
-             
+        // Trouver le dossier le plus récent
+        const char *most_recent_folder = find_most_recent_folder(&logs);
+        if (most_recent_folder) {
+            // Créer le chemin complet du dossier le plus récent
+            char most_recent_folder_path[512];
+            snprintf(most_recent_folder_path, sizeof(most_recent_folder_path), "%s/%s", backup_dir, most_recent_folder);
+            
+            printf("Dossier le plus récent : %s\n", most_recent_folder_path);
 
-    }
-
-    // Créer un log_element pour ce fichier
-        log_element *elt = malloc(sizeof(log_element));
-        if (!elt) {
-            perror("Erreur d'allocation mémoire pour log_element");
-            return;
+            copy_with_hard_links(most_recent_folder_path, full_backup_path);
+        } else {
+            printf("Aucun dossier précédent trouvé.\n");
         }
-
+    }
 
     printf("Sauvegarde terminée : %s\n", full_backup_path);
 }
+
+
+
+
+char* construct_folder_path(const char *base_path, const char *folder_name) {
+    // Allouer de la mémoire pour le chemin complet (base_path + '/' + folder_name + '\0')
+    size_t path_length = strlen(base_path) + strlen(folder_name) + 2; // 2 pour le séparateur '/' et '\0'
+    char *full_path = (char*)malloc(path_length);
+    
+    if (!full_path) {
+        perror("Erreur d'allocation mémoire");
+        return NULL;
+    }
+
+    // Construire le chemin complet
+    snprintf(full_path, path_length, "%s/%s", base_path, folder_name);
+    
+    return full_path; // Retourner le chemin complet
+}
+
+
+// Function to join paths safely
+void join_paths(const char *base, const char *name, char *result, size_t size) {
+    snprintf(result, size, "%s/%s", base, name);
+}
+
+#include <errno.h>
+#include <limits.h> // Inclure pour PATH_MAX si disponible
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096 // Définit PATH_MAX si non défini par le système
+#endif
+
+
+// Recursive function to copy source to destination using hard links
+int copy_with_hard_links(const char *source, const char *destination) {
+    DIR *dir;
+    struct dirent *entry;
+    struct stat entry_stat;
+    char source_path[PATH_MAX];
+    char destination_path[PATH_MAX];
+
+    // Open the source directory
+    dir = opendir(source);
+    if (dir == NULL) {
+        perror("Failed to open source directory");
+        return -1;
+    }
+
+    // Ensure the destination directory exists
+    if (mkdir(destination, 0755) == -1 && errno != EEXIST) {
+        perror("Failed to create destination directory");
+        closedir(dir);
+        return -1;
+    }
+
+    // Iterate over all entries in the source directory
+    while ((entry = readdir(dir)) != NULL) {
+        // Skip "." and ".."
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        // Construct full paths for source and destination
+        join_paths(source, entry->d_name, source_path, sizeof(source_path));
+        join_paths(destination, entry->d_name, destination_path, sizeof(destination_path));
+
+        // Get the entry's metadata
+        if (lstat(source_path, &entry_stat) == -1) {
+            perror("Failed to stat source entry");
+            closedir(dir);
+            return -1;
+        }
+
+        // Handle directories recursively
+        if (S_ISDIR(entry_stat.st_mode)) {
+            if (copy_with_hard_links(source_path, destination_path) == -1) {
+                closedir(dir);
+                return -1;
+            }
+        } else if (S_ISREG(entry_stat.st_mode)) {
+            // Create a hard link for regular files
+            if (link(source_path, destination_path) == -1) {
+                perror("Failed to create hard link");
+                closedir(dir);
+                return -1;
+            }
+        } else {
+            fprintf(stderr, "Skipping unsupported file type: %s\n", source_path);
+        }
+    }
+
+    closedir(dir);
+    return 0;
+}
+
+
+
 
 
 // Fonction permettant d'enregistrer dans fichier le tableau de chunk dédupliqué
@@ -241,9 +370,8 @@ void restore_backup(const char *backup_id, const char *restore_dir) {
     */
 }
 
-
-
 int main() {
     create_backup("/home/qricci/Photos/2018-01-24", "/home/qricci/Documents/Test_backup");
     return 0;
 }
+

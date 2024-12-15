@@ -3,6 +3,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <dirent.h>
+#include <time.h>
 #include "file_handler.h"
 #include "deduplication.h"
 
@@ -78,19 +79,112 @@ log_t read_backup_log(const char *logfile) {
 }
 
 
-// Fonction permettant de mettre à jour une ligne du fichier .backup_log
-void write_log_element(log_element *elt, FILE *logfile) {
 
-    // Vérifier que l'élément et le fichier ne sont pas NULL
-    if (!elt || !logfile) {
-        fprintf(stderr, "Erreur : l'élément ou le fichier est NULL.\n");
+
+int file_md5(const char *file_path, unsigned char *md5_result) {
+    FILE *file = fopen(file_path, "rb");
+    if (!file) {
+        perror("Erreur lors de l'ouverture du fichier pour MD5");
+        return 1;
+    }
+
+    MD5_CTX md5_context;
+    MD5_Init(&md5_context);
+
+    unsigned char buffer[4096];
+    size_t bytes_read;
+    while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) != 0) {
+        MD5_Update(&md5_context, buffer, bytes_read);
+    }
+
+    MD5_Final(md5_result, &md5_context);
+    fclose(file);
+    return 0;
+}
+
+// Fonction pour récupérer les informations d'un fichier et remplir un log_element
+int create_log_element_from_file(const char *file_path, log_element *element) {
+    struct stat file_stat;
+
+    // Récupérer les métadonnées du fichier
+    if (stat(file_path, &file_stat) != 0) {
+        perror("Erreur lors de la récupération des métadonnées du fichier");
+        return 1;
+    }
+
+    // Remplir le champ path
+    element->path = strdup(file_path);
+
+    // Formater la date de modification
+    char date_buffer[64];
+    struct tm *mod_time = localtime(&file_stat.st_mtime);
+    if (!mod_time) {
+        perror("Erreur lors de la conversion de la date");
+        free(element->path);
+        return 1;
+    }
+    strftime(date_buffer, sizeof(date_buffer), "%Y-%m-%d-%H:%M:%S", mod_time);
+    element->date = strdup(date_buffer);
+
+    // Calculer le MD5
+    if (file_md5(file_path, element->md5) != 0) {
+        fprintf(stderr, "Erreur lors du calcul du MD5\n");
+        free(element->path);
+        free(element->date);
+        return 1;
+    }
+
+    element->next = NULL;
+    element->prev = NULL;
+
+    return 0;
+}
+
+
+
+void get_file_mtime(const char *file_path, char *mtime_buffer, size_t buffer_size) {
+    struct stat file_stat;
+    if (stat(file_path, &file_stat) == -1) {
+        perror("Erreur lors de la récupération du mtime");
+        strncpy(mtime_buffer, "unknown", buffer_size);
         return;
     }
 
-    // Écrire le chemin du fichier
-    fprintf(logfile, "%s;", elt->path);
+    struct tm *timeinfo = localtime(&file_stat.st_mtime);
+    strftime(mtime_buffer, buffer_size, "%Y-%m-%d-%H:%M:%S", timeinfo);
+}
 
-    // Écrire la date de modification
+
+
+const char *get_relative_path(const char *full_path, const char *logfile) {
+    const char *log_dir = strstr(logfile, ".backup_log");
+    if (!log_dir) {
+        fprintf(stderr, "Erreur : .backup_log introuvable dans le chemin fourni\n");
+        return full_path; // Si le chemin de .backup_log n'est pas trouvé, retourner le chemin complet
+    }
+
+    size_t log_dir_len = log_dir - logfile; // Longueur du chemin jusqu'à .backup_log
+    const char *base_path = full_path + log_dir_len; // Construire le chemin relatif
+
+    // Vérifier si le chemin relatif commence par un "/"
+    if (base_path[0] == '/')
+        base_path++;
+
+    return base_path;
+}
+
+
+
+
+// Fonction permettant de mettre à jour une ligne du fichier .backup_log
+void write_log_element(log_element *elt, FILE *logfile) {
+    // Extraire le chemin relatif du fichier
+    const char *relative_path = get_relative_path(elt->path, "/home/qricci/Documents/Test_backup/.backup_log");
+
+    // Écrire le chemin relatif dans le fichier de log
+    fprintf(logfile, "%s;", relative_path);
+
+    // Écrire la date de dernière modification (mtime)
     fprintf(logfile, "%s;", elt->date);
 
     // Écrire le hash MD5 en format hexadécimal
@@ -160,6 +254,12 @@ void list_files(const char *path) {
     // Fermer le répertoire
     closedir(dir);
 }
+
+
+// Fonction pour copier un fichier
+
+
+void copy_file(const char *src, const char *dest);
 
 // Fonction pour copier un fichier
 void copy_single_file(const char *src_file, const char *dest_file) {
@@ -242,6 +342,8 @@ void copy_file(const char *src, const char *dest) {
         fprintf(stderr, "Source is neither a file nor a directory\n");
     }
 } 
+
+
 
 
 
