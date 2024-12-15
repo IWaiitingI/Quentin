@@ -3,6 +3,12 @@
 #include <string.h>
 #include <openssl/md5.h>
 
+
+#include "deduplication.h"
+#include "file_handler.h"
+#include <dirent.h>
+
+
 #define CHUNK_SIZE 4096
 #define HASH_TABLE_SIZE 1000
 #define MD5_DIGEST_LENGTH 16
@@ -98,6 +104,41 @@ void deduplicate_file(FILE *file, Chunk *chunks, Md5Entry *hash_table) {
     
     // Terminer la lecture du fichier
     printf("Déduplication terminée, %d chunks traités.\n", chunk_index);
+}
+
+void undeduplicate_file(FILE *file, Chunk **chunks, int *chunk_count) {
+    *chunk_count = 0;
+    unsigned char buffer[CHUNK_SIZE];
+    int chunk_index = 0;
+    size_t lecture_chunk;
+
+
+    //compte du nombre de chunks
+    while ((lecture_chunk = fread(buffer, sizeof(unsigned long), CHUNK_SIZE, file)) > 0) {
+        *chunk_count++;
+    }
+    if (feof(file)){
+        return;
+    }
+    else if (ferror(file)){
+        printf("probleme dans la lecture du fichier");
+        return;
+    }
+    printf("nombre de chunks : %d\n",*chunk_count);
+
+
+    *chunks = malloc(*chunk_count * sizeof(Chunk));
+    for (int i = 0; i < *chunk_count; i++) {
+        fread((*chunks)[i].md5, 1, MD5_DIGEST_LENGTH, file);
+
+
+        size_t data_size;
+        fread(&data_size, sizeof(size_t), 1, file);
+
+
+        (*chunks)[i].data = malloc(data_size);
+        fread((*chunks)[i].data, 1, data_size, file);
+    }
 }
 
 // Fonction pour afficher la table de hachage
