@@ -161,12 +161,6 @@ void list_files(const char *path) {
     closedir(dir);
 }
 
-
-// Fonction pour copier un fichier
-
-
-void copy_file(const char *src, const char *dest);
-
 // Fonction pour copier un fichier
 void copy_single_file(const char *src_file, const char *dest_file) {
     FILE *src_fp = fopen(src_file, "rb");
