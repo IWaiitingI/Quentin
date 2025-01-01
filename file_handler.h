@@ -19,13 +19,20 @@ typedef struct {
     log_element *tail; // Fin de la liste de log
 } log_t;
 
+typedef struct {
+    char folder_name[512];
+    time_t creation_time;
+    off_t log_size;
+} BackupInfo;
 
 log_t read_backup_log(const char *logfile);
 void update_backup_log(const char *logfile, log_t *logs);
-void write_log_element(log_element *elt, FILE *logfile);
+void write_log_element(log_element *elt, FILE *logfile, const char *backup_log);
 void list_files(const char *path);
 void copy_single_file(const char *src_file, const char *dest_file);
 void copy_directory(const char *src, const char *dest);
 void copy_file(const char *src, const char *dest);
+BackupInfo *find_backup_logs(const char *directory, int *count);
+void print_backup_info(BackupInfo *infos, int count);
 
 #endif // FILE_HANDLER_H

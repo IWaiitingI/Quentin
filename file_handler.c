@@ -81,6 +81,7 @@ log_t read_backup_log(const char *logfile) {
 
 
 
+
 int file_md5(const char *file_path, unsigned char *md5_result) {
     FILE *file = fopen(file_path, "rb");
     if (!file) {
@@ -177,9 +178,11 @@ const char *get_relative_path(const char *full_path, const char *logfile) {
 
 
 // Fonction permettant de mettre à jour une ligne du fichier .backup_log
-void write_log_element(log_element *elt, FILE *logfile) {
+void write_log_element(log_element *elt, FILE *logfile, const char *backup_log) {
     // Extraire le chemin relatif du fichier
-    const char *relative_path = get_relative_path(elt->path, "/home/qricci/Documents/Test_backup/.backup_log");
+    char back[500];
+    snprintf(back, sizeof(back), "%s/.backup_log", backup_log);
+    const char *relative_path = get_relative_path(elt->path, back);
 
     // Écrire le chemin relatif dans le fichier de log
     fprintf(logfile, "%s;", relative_path);
@@ -198,61 +201,69 @@ void write_log_element(log_element *elt, FILE *logfile) {
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <errno.h>
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
 
-void list_files(const char *path) {
-    /* Implémenter la logique pour lister les fichiers présents dans un répertoire
-     * @param: path - le chemin du répertoire à lister
-     */
 
-    // Vérifier si le chemin est valide
-    if (!path) {
-        fprintf(stderr, "Erreur : chemin NULL fourni à list_files.\n");
-        return;
-    }
-
-    // Ouvrir le répertoire
-    DIR *dir = opendir(path);
-    if (!dir) {
-        perror("Erreur lors de l'ouverture du répertoire");
-        return;
-    }
-
+BackupInfo *find_backup_logs(const char *directory, int *count) {
     struct dirent *entry;
-    struct stat file_stat;
-    char full_path[PATH_MAX];
+    struct stat file_stat, log_stat;
+    DIR *dp = opendir(directory);
 
-    // Parcourir le contenu du répertoire
-    while ((entry = readdir(dir)) != NULL) {
-        // Ignorer les répertoires "." et ".."
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+    if (!dp) {
+        perror("Erreur lors de l'ouverture du répertoire");
+        return NULL;
+    }
+
+    BackupInfo *results = NULL;
+    *count = 0;
+
+    while ((entry = readdir(dp)) != NULL) {
+        // Ignorer les entrées spéciales "." et ".."
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
             continue;
-        }
 
-        // Construire le chemin complet
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+        // Construire le chemin complet pour chaque élément
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/%s", directory, entry->d_name);
 
-        // Récupérer les informations sur le fichier ou le répertoire
-        if (stat(full_path, &file_stat) == -1) {
-            perror("Erreur lors de la récupération des informations sur le fichier");
-            continue;
-        }
+        // Vérifier si c'est un répertoire
+        if (stat(full_path, &file_stat) == 0 && S_ISDIR(file_stat.st_mode)) {
+            // Construire le chemin vers le fichier `.backup_log`
+            char log_path[512];
+            snprintf(log_path, sizeof(log_path), "%s/.backup_log", full_path);
 
-        // Vérifier si c'est un fichier ou un répertoire
-        if (S_ISDIR(file_stat.st_mode)) {
-            printf("Répertoire : %s\n", full_path);
+            // Vérifier si le fichier `.backup_log` existe
+            if (stat(log_path, &log_stat) == 0 && S_ISREG(log_stat.st_mode)) {
+                // Allouer de la mémoire pour stocker les résultats
+                results = realloc(results, (*count + 1) * sizeof(BackupInfo));
 
-            // Appeler récursivement pour les sous-répertoires
-            list_files(full_path);
-        } else if (S_ISREG(file_stat.st_mode)) {
-            printf("Fichier : %s\n", full_path);
+                // Remplir les informations sur le dossier et le fichier
+                strncpy(results[*count].folder_name, entry->d_name, sizeof(results[*count].folder_name) - 1);
+                results[*count].creation_time = log_stat.st_ctime;
+                results[*count].log_size = log_stat.st_size;
+
+                (*count)++;
+            }
         }
     }
 
-    // Fermer le répertoire
-    closedir(dir);
+    closedir(dp);
+    return results;
+}
+
+void print_backup_info(BackupInfo *infos, int count) {
+    for (int i = 0; i < count; i++) {
+        char creation_time[64];
+        struct tm *tm_info = localtime(&infos[i].creation_time);
+        strftime(creation_time, sizeof(creation_time), "%Y-%m-%d %H:%M:%S", tm_info);
+
+        printf("Dossier: %s\n", infos[i].folder_name);
+        printf("Date de création: %s\n", creation_time);
+        printf("Taille du fichier .backup_log: %ld octets\n\n", infos[i].log_size);
+    }
 }
 
 
@@ -293,6 +304,12 @@ void copy_directory(const char *src, const char *dest) {
         return;
     }
 
+    // Créer le répertoire de destination si nécessaire
+    if (mkdir(dest, 0755) == -1 && errno != EEXIST) {
+        perror("Error creating destination directory");
+        closedir(dir);
+        return;
+    }
 
     struct dirent *entry;
     char src_path[1024], dest_path[1024];

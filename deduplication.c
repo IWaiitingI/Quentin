@@ -114,31 +114,3 @@ void print_hash_table(Md5Entry *hash_table) {
     }
 }
 
-int main() {
-    // Ouvrir le fichier à dédupliquer
-    FILE *file = fopen("Hello.txt", "rb");
-    if (file == NULL) {
-        printf("Erreur d'ouverture du fichier.\n");
-        return -1;
-    }
-    
-    // Initialiser la table de hachage avec des index invalides (-1)
-    Md5Entry hash_table[HASH_TABLE_SIZE];
-    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
-        hash_table[i].index = -1;
-    }
-    
-    // Tableau pour stocker les chunks
-    Chunk chunks[100]; // Limité à 100 chunks pour ce test
-    
-    // Appeler la fonction pour dédupliquer le fichier
-    deduplicate_file(file, chunks, hash_table);
-    
-    // Afficher la table de hachage après déduplication
-    print_hash_table(hash_table);
-    
-    // Fermer le fichier
-    fclose(file);
-    
-    return 0;
-}

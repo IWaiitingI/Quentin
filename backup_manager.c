@@ -132,7 +132,7 @@ const char *find_most_recent_folder(log_t *logs) {
     return folder_name; // Retourner le nom du dossier (ex: "2024-12-15-16:37:24.967")
 }
 
-void process_directory(const char *directory_path, FILE *logs) {
+void process_directory(const char *directory_path, FILE *logs, const char *backup_dir) {
     DIR *dir;
     struct dirent *entry;
 
@@ -150,26 +150,249 @@ void process_directory(const char *directory_path, FILE *logs) {
             continue;
         }
 
-        // Construit le chemin complet du fichier
+        // Construit le chemin complet du fichier/dossier
         char file_to_process[1024];
         snprintf(file_to_process, sizeof(file_to_process), "%s/%s", directory_path, entry->d_name);
 
-        // Appelle la fonction create_log_element_from_file pour chaque fichier
-        log_element test_element;
-        create_log_element_from_file(file_to_process, &test_element);
-        FILE *logfile = fopen(logs, "a");
-        if (!logfile) {
-            perror("Erreur lors de l'ouverture du fichier de log");
+        // Vérifie si l'entrée est un répertoire
+        struct stat statbuf;
+        if (stat(file_to_process, &statbuf) == -1) {
+            perror("Erreur lors de la récupération des informations du fichier");
+            continue;
+        }
+
+        if (S_ISDIR(statbuf.st_mode)) {
+            // Si c'est un répertoire, appel récursif sur le sous-dossier
+            process_directory(file_to_process, logs, backup_dir);
+        } else if (S_ISREG(statbuf.st_mode)) {
+            // Si c'est un fichier, traitement du fichier
+            log_element test_element;
+            create_log_element_from_file(file_to_process, &test_element);
+
+            // Écriture dans le fichier de log
+            FILE *logfile = fopen(logs, "a");
+            if (!logfile) {
+                perror("Erreur lors de l'ouverture du fichier de log");
+                free(test_element.path);
+                free(test_element.date);
+                continue;
+            }
+            write_log_element(&test_element, logfile, backup_dir);
+            fclose(logfile);
+
+            // Libère la mémoire allouée pour les éléments de log
             free(test_element.path);
             free(test_element.date);
-        return 1;
-    }
-        write_log_element(&test_element, logfile);
+        }
     }
 
     // Ferme le dossier
     closedir(dir);
 }
+
+
+
+
+
+// Fonction pour supprimer un fichier
+int remove(const char *filepath) {
+    // Utilise la fonction standard de C pour supprimer un fichier
+    if (unlink(filepath) == 0) {
+        printf("Fichier supprimé : %s\n", filepath);
+        return 0;
+    } else {
+        perror("Erreur lors de la suppression du fichier");
+        return -1;
+    }
+}
+
+// Fonction pour vérifier si un fichier existe dans un répertoire
+int file_exists_in_dir(const char *directory, const char *filename) {
+    char filepath[1024];
+    snprintf(filepath, sizeof(filepath), "%s/%s", directory, filename);
+    struct stat buffer;
+    return (stat(filepath, &buffer) == 0);
+}
+
+
+
+
+int files_are_different(const char *file1, const char *file2) {
+    struct stat stat1, stat2;
+
+    // Obtenir les informations des fichiers
+    if (stat(file1, &stat1) == -1 || stat(file2, &stat2) == -1) {
+        perror("Erreur lors de l'accès aux fichiers pour comparaison");
+        return 1; // Considérer les fichiers comme différents si les stat échouent
+    }
+
+    // Comparer les tailles des fichiers
+    if (stat1.st_size != stat2.st_size) {
+        return 1; // Les fichiers ont des tailles différentes
+    }
+
+    // Ouvrir les fichiers
+    FILE *f1 = fopen(file1, "rb");
+    FILE *f2 = fopen(file2, "rb");
+
+    if (!f1 || !f2) {
+        if (f1) fclose(f1);
+        if (f2) fclose(f2);
+        return 1; // Considérer les fichiers comme différents si l'un des deux ne peut être ouvert
+    }
+
+    // Lire et comparer le contenu des fichiers par blocs
+    char buffer1[4096], buffer2[4096];
+    size_t size1, size2;
+
+    do {
+        size1 = fread(buffer1, 1, sizeof(buffer1), f1);
+        size2 = fread(buffer2, 1, sizeof(buffer2), f2);
+
+        if (size1 != size2 || memcmp(buffer1, buffer2, size1) != 0) {
+            fclose(f1);
+            fclose(f2);
+            return 1; // Les fichiers sont différents
+        }
+    } while (size1 > 0 && size2 > 0);
+
+    fclose(f1);
+    fclose(f2);
+    return 0; // Les fichiers sont identiques
+}
+
+#include <unistd.h>
+
+void sync_directories(const char *dir1, const char *dir2) {
+    DIR *dir;
+    struct dirent *entry;
+
+    // Vérifier les fichiers et sous-dossiers du premier répertoire (dir1)
+    dir = opendir(dir1);
+    if (dir == NULL) {
+        perror("Erreur lors de l'ouverture du premier répertoire");
+        return;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        char filepath1[1024];
+        snprintf(filepath1, sizeof(filepath1), "%s/%s", dir1, entry->d_name);
+
+        char filepath2[1024];
+        snprintf(filepath2, sizeof(filepath2), "%s/%s", dir2, entry->d_name);
+
+        struct stat statbuf1, statbuf2;
+
+        if (stat(filepath1, &statbuf1) == -1) {
+            perror("Erreur lors de l'obtention des informations du fichier source");
+            continue;
+        }
+
+        if (S_ISDIR(statbuf1.st_mode)) {
+            // Si c'est un répertoire
+            if (stat(filepath2, &statbuf2) == -1) {
+                // Répertoire inexistant dans dir2 -> le supprimer
+                printf("Suppression du répertoire : %s\n", filepath1);
+                sync_directories(filepath1, filepath2);
+                rmdir(filepath1); // Supprime le répertoire une fois vide
+            } else {
+                sync_directories(filepath1, filepath2);
+            }
+        } else if (S_ISREG(statbuf1.st_mode)) {
+            // Si c'est un fichier
+            if (stat(filepath2, &statbuf2) == -1) {
+                // Fichier inexistant dans dir2 -> le supprimer
+                printf("Suppression du fichier : %s\n", filepath1);
+                unlink(filepath1); // Supprime le fichier
+            } else if (files_are_different(filepath1, filepath2)) {
+                // Vérifier si le fichier est un lien dur
+                if (statbuf1.st_nlink > 1) {
+                    // Le fichier a des liens durs, créer une copie unique
+                    printf("Le fichier %s a des liens durs, création d'une copie unique\n", filepath1);
+
+                    char temp_filepath[1024];
+                    snprintf(temp_filepath, sizeof(temp_filepath), "%s.tmp", filepath1);
+
+                    copy_file(filepath1, temp_filepath);  // Copie temporaire
+                    rename(temp_filepath, filepath1);     // Remplacement du fichier original
+                }
+
+                // Si le fichier est différent, le mettre à jour
+                printf("Mise à jour du fichier : %s -> %s\n", filepath2, filepath1);
+                copy_file(filepath2, filepath1);
+            }
+        }
+    }
+    closedir(dir);
+
+    // Vérifier les fichiers et sous-dossiers du deuxième répertoire (dir2)
+    dir = opendir(dir2);
+    if (dir == NULL) {
+        perror("Erreur lors de l'ouverture du deuxième répertoire");
+        return;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        char filepath1[1024];
+        snprintf(filepath1, sizeof(filepath1), "%s/%s", dir1, entry->d_name);
+
+        char filepath2[1024];
+        snprintf(filepath2, sizeof(filepath2), "%s/%s", dir2, entry->d_name);
+
+        struct stat statbuf1;
+
+        if (stat(filepath2, &statbuf1) == -1) {
+            perror("Erreur lors de l'obtention des informations du fichier");
+            continue;
+        }
+
+        if (S_ISDIR(statbuf1.st_mode)) {
+            // Si c'est un répertoire
+            if (stat(filepath1, &statbuf1) == -1) {
+                // Le répertoire n'existe pas dans dir1, le copier
+                printf("Ajout du répertoire : %s -> %s\n", filepath2, filepath1);
+                mkdir(filepath1, 0755);
+                sync_directories(filepath1, filepath2);
+            }
+        } else if (S_ISREG(statbuf1.st_mode)) {
+            // Si c'est un fichier
+            if (stat(filepath1, &statbuf1) == -1) {
+                // Le fichier n'existe pas dans dir1, le copier
+                printf("Ajout du fichier : %s -> %s\n", filepath2, filepath1);
+                copy_file(filepath2, filepath1);
+            } else if (files_are_different(filepath1, filepath2)) {
+                // Vérifier si le fichier est un lien dur
+                if (statbuf1.st_nlink > 1) {
+
+                    char temp_filepath[1024];
+                    snprintf(temp_filepath, sizeof(temp_filepath), "%s.tmp", filepath1);
+
+                    copy_file(filepath1, temp_filepath);  // Copie temporaire
+                    rename(temp_filepath, filepath1);     // Remplacement du fichier original
+                }
+
+                // Si le fichier est différent, le mettre à jour
+                printf("Mise à jour du fichier : %s -> %s\n", filepath2, filepath1);
+                copy_file(filepath2, filepath1);
+            }
+        }
+    }
+    closedir(dir);
+}
+
+
+
+
+
+
 
 
 
@@ -208,7 +431,7 @@ void create_backup(const char *source_dir, const char *backup_dir) {
         // Ouvrir le fichier de log
         char log_path[512];
         snprintf(log_path, sizeof(log_path), "%s/.backup_log", backup_dir);
-        FILE *logfile = fopen(log_path, "w");
+        FILE *logfile = fopen(log_path, "a");
         if (!logfile) {
             perror("Erreur lors de la création du fichier .backup_log");
             return;
@@ -217,19 +440,8 @@ void create_backup(const char *source_dir, const char *backup_dir) {
         // Copier le répertoire source
         copy_file(source_dir, full_backup_path);
 
-        process_directory(full_backup_path, log_path);
-
-        // Créer le chemin complet du fichier de log à l'intérieur du répertoire de sauvegarde
-        char log_dest_path[512];
-        snprintf(log_dest_path, sizeof(log_dest_path), "%s/.backup_log", full_backup_path);
-
-        // Copier le fichier de log dans le répertoire de sauvegarde
-
-
-        // Fermer le fichier de log
-        fclose(logfile);
-
-        copy_single_file(log_path, log_dest_path);
+        process_directory(full_backup_path, log_path, backup_dir);
+        
 
     } else {
         // Sauvegarde incrémentale
@@ -250,15 +462,26 @@ void create_backup(const char *source_dir, const char *backup_dir) {
 
             char log_path[512];
             snprintf(log_path, sizeof(log_path), "%s/.backup_log", backup_dir);
-            FILE *logfile = fopen(log_path, "a");
 
-            process_directory(full_backup_path, log_path );
+            sync_directories(full_backup_path, source_dir);
 
+            FILE *log1 = fopen(log_path, "w");
+            fclose(log1);
 
+            process_directory(full_backup_path, log_path, backup_dir );
+
+            
         } else {
             printf("Aucun dossier précédent trouvé.\n");
         }
     }
+
+    char log_dest_path[512];
+    snprintf(log_dest_path, sizeof(log_dest_path), "%s/.backup_log", full_backup_path);
+    char back[500]; // Déclare une chaîne suffisamment grande pour contenir le chemin complet.
+    snprintf(back, sizeof(back), "%s/.backup_log", backup_dir); // Formate la chaîne avec le répertoire de sauvegarde.
+    copy_single_file(back, log_dest_path); // Appelle la fonction pour copier le fichier.
+
 
     printf("Sauvegarde terminée : %s\n", full_backup_path);
 }
@@ -266,22 +489,6 @@ void create_backup(const char *source_dir, const char *backup_dir) {
 
 
 
-
-char* construct_folder_path(const char *base_path, const char *folder_name) {
-    // Allouer de la mémoire pour le chemin complet (base_path + '/' + folder_name + '\0')
-    size_t path_length = strlen(base_path) + strlen(folder_name) + 2; // 2 pour le séparateur '/' et '\0'
-    char *full_path = (char*)malloc(path_length);
-    
-    if (!full_path) {
-        perror("Erreur d'allocation mémoire");
-        return NULL;
-    }
-
-    // Construire le chemin complet
-    snprintf(full_path, path_length, "%s/%s", base_path, folder_name);
-    
-    return full_path; // Retourner le chemin complet
-}
 
 
 // Function to join paths safely
@@ -385,14 +592,97 @@ void write_restored_file(const char *output_filename, Chunk *chunks, int chunk_c
 }
 
 // Fonction pour restaurer une sauvegarde
+#include <sys/stat.h>
+#include <unistd.h>
+#include <libgen.h> // Pour dirname
+
 void restore_backup(const char *backup_id, const char *restore_dir) {
-    /* @param: backup_id est le chemin vers le répertoire de la sauvegarde que l'on veut restaurer
-    *          restore_dir est le répertoire de destination de la restauration
-    */
+    // Vérifier si le répertoire de destination est valide
+    struct stat restore_stat;
+
+    if (stat(restore_dir, &restore_stat) == -1) {
+        perror("Le répertoire de restauration spécifié est inaccessible");
+        return;
+    }
+
+    if (!S_ISDIR(restore_stat.st_mode)) {
+        fprintf(stderr, "Le chemin de destination n'est pas un répertoire.\n");
+        return;
+    }
+
+    // Construire le chemin du fichier `.backup_log` pour la sauvegarde spécifiée
+    char backup_log_path[512];
+    snprintf(backup_log_path, sizeof(backup_log_path), "%s/.backup_log", backup_id);
+
+    // Lire le fichier .backup_log
+    log_t logs = read_backup_log(backup_log_path);
+    if (!logs.head) {
+        fprintf(stderr, "Aucun fichier à restaurer trouvé dans .backup_log\n");
+        return;
+    }
+
+    // Parcourir les éléments du journal pour restaurer les fichiers
+    log_element *current = logs.head;
+    while (current) {
+        // Construire le chemin source (dans le répertoire de sauvegarde)
+        char source_path[512];
+        snprintf(source_path, sizeof(source_path), "%s/%s", backup_id, current->path);
+
+        // Construire le chemin de destination (dans le répertoire de restauration)
+        char dest_path[512];
+        snprintf(dest_path, sizeof(dest_path), "%s/%s", restore_dir, current->path);
+
+        // Extraire le répertoire parent du fichier destination
+        char dest_dir[512];
+        snprintf(dest_dir, sizeof(dest_dir), "%s", dest_path);
+        dirname(dest_dir);
+
+        // Vérifier si le répertoire parent existe, sinon le créer
+        struct stat dir_stat;
+        if (stat(dest_dir, &dir_stat) == -1) {
+            printf("Création du répertoire : %s\n", dest_dir);
+            if (mkdir(dest_dir, 0755) == -1) {
+                perror("Erreur lors de la création du répertoire");
+                continue; // Passer au fichier suivant en cas d'erreur
+            }
+        }
+
+        // Vérifier si le fichier destination existe déjà
+        if (access(dest_path, F_OK) == 0) {  // Le fichier existe
+            // Comparer les fichiers uniquement si le fichier destination existe
+            if (files_are_different(source_path, dest_path)) {
+                printf("Mise à jour de %s -> %s\n", source_path, dest_path);
+                copy_single_file(source_path, dest_path);
+            } else {
+                printf("Le fichier %s est déjà à jour.\n", dest_path);
+            }
+        } else {
+            // Le fichier destination n'existe pas, copier directement
+            printf("Copie initiale de %s -> %s\n", source_path, dest_path);
+            copy_single_file(source_path, dest_path);
+        }
+
+        current = current->next;
+    }
+
+    // Libérer la mémoire allouée pour le journal
+    free_backup_log(&logs);
 }
 
-int main() {
-    create_backup("/home/qricci/Photos/2018-01-24", "/home/qricci/Documents/Test_backup");
-    return 0;
+
+
+void free_backup_log(log_t *logs) {
+    log_element *current = logs->head;
+    while (current) {
+        log_element *next = current->next;
+        free(current->path);
+        free(current->date);
+        free(current);
+        current = next;
+    }
+    logs->head = logs->tail = NULL;
 }
+
+
+
 
