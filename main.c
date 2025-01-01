@@ -43,15 +43,17 @@ int main(int argc, char *argv[]) {
                 if (optind < argc) {
                     source_dir = optarg;
                     backup_dir = argv[optind];
+                    create_backup(source_dir, backup_dir);
                 } else {
                     printf("Erreur : --backup nécessite deux arguments <source_dir> <backup_dir>\n");
                     return EXIT_FAILURE;
                 }
                 break;
             case 'r': // --restore
-                if (optind < argc - 1) {
+                if (optind < argc) {
                     backup_id = optarg;
                     restore_dir = argv[optind];
+                    restore_backup(backup_id,restore_dir);
                 } else {
                     printf("Erreur : --restore nécessite deux arguments <backup_id> <restore_dir>\n");
                     return EXIT_FAILURE;
@@ -59,6 +61,11 @@ int main(int argc, char *argv[]) {
                 break;
             case 'l': // --list-backups
                 backup_dir = optarg;
+                const char *directory = backup_dir;
+                int count = 0;
+                BackupInfo *infos = find_backup_logs(directory, &count);
+                printf("Nombre de dossiers de backup: %d\n\n", count);
+                print_backup_info(infos, count);
                 break;
             case 'h': // --help
                 print_usage(argv[0]);
@@ -68,23 +75,5 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
         }
     }
-    // Implémentation de la logique de sauvegarde et restauration
-    if (source_dir && backup_dir) {
-        printf("Création d'une sauvegarde depuis '%s' vers '%s'...\n", source_dir, backup_dir);
-        create_backup(source_dir, backup_dir);
-        printf("Sauvegarde terminée avec succès.\n");
-    } else if (backup_id && restore_dir) {
-        printf("Restauration de la sauvegarde '%s' vers '%s'...\n", backup_id, restore_dir);
-        restore_backup(backup_id, restore_dir);
-        printf("Restauration terminée avec succès.\n");
-    } else if (backup_dir) {
-        printf("Liste des sauvegardes dans le répertoire '%s':\n", backup_dir);
-        list_backups(backup_dir);
-    } else {
-        print("Erreur : Aucune option valide n'a été fournie.\n");
-        print_usage(argv[0]);
-        return EXIT_FAILURE;
-    }
 
-    return EXIT_SUCCESS;
 }
